@@ -171,9 +171,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                             "sun.nio.ch.SelectorImpl",
                             false,
                             PlatformDependent.getSystemClassLoader());
-                } catch (ClassNotFoundException e) {
-                    return e;
-                } catch (SecurityException e) {
+                } catch (ClassNotFoundException | SecurityException e) {
                     return e;
                 }
             }
@@ -204,9 +202,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     selectedKeysField.set(selector, selectedKeySet);
                     publicSelectedKeysField.set(selector, selectedKeySet);
                     return null;
-                } catch (NoSuchFieldException e) {
-                    return e;
-                } catch (IllegalAccessException e) {
+                } catch (NoSuchFieldException | IllegalAccessException e) {
                     return e;
                 } catch (RuntimeException e) {
                     // JDK 9 can throw an inaccessible object exception here; since Netty compiles
@@ -389,49 +385,36 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         logger.info("Migrated " + nChannels + " channel(s) to the new Selector.");
     }
 
+    // 在调用 'selector.wakeup()' 方法之前 ,  先调用 'wakenUp.compareAndSet(false, true)'
+    // 来减少 wakeup 的开销, 因为 JDK NIO 的 Selector.wakeup() 是一个代价高昂的操作.
+    //
+    // However, there is a race condition in this approach.
+    // The race condition is triggered when 'wakenUp' is set to
+    // true too early.
+    // 如果 'wakenUp' 被过早的设置为了 true
+    // 1; 最坏的一种情况: Selector 是在 'wakenUp.set(false)' 和 'selector.select(...)' 执行之间的时候被置为true
+    // 2) 最好的一种情况: Selector 是在 'selector.select(...)' 和 'if (wakenUp.get()) { ... }'. 执行之前被置为 true
+    // 在第一种情况, 'wakenUp' 是 true, 接下来执行 'selector.select(...)' 操作, 但是 'wakenUp.compareAndSet(false, true)' 会失败,
+    // 除非直到 'wakenUp' 在下一轮选择的时候被设置为 false. 因此, 此时的任何唤醒 Selector 的行为都无效. 会引起 'selector.select(...)' 调用一直
+    // 处于不必要的阻塞状态, 为了修复这个问题, Netty 选择在 selector.select(...) 执行后, 当 wakenUp 是 true, 则立即将其唤醒
+    //
+    // It is inefficient in that it wakes up the selector for both
+    // the first case (BAD - wake-up required) and the second case
+    // (OK - no wake-up required).
     @Override
     protected void run() {
         for (;;) {
-            try {
-                switch (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) {
-                    case SelectStrategy.CONTINUE:
+            try { // hasTasks 方法会判断当前异步任务队列里有没有任务需要执行
+                switch (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) { // 计算轮询策略
+                    case SelectStrategy.CONTINUE: // -2
                         continue;
-                    case SelectStrategy.SELECT:
-                        select(wakenUp.getAndSet(false));
-
-                        // 'wakenUp.compareAndSet(false, true)' is always evaluated
-                        // before calling 'selector.wakeup()' to reduce the wake-up
-                        // overhead. (Selector.wakeup() is an expensive operation.)
-                        //
-                        // However, there is a race condition in this approach.
-                        // The race condition is triggered when 'wakenUp' is set to
-                        // true too early.
-                        //
-                        // 'wakenUp' is set to true too early if:
-                        // 1) Selector is waken up between 'wakenUp.set(false)' and
-                        //    'selector.select(...)'. (BAD)
-                        // 2) Selector is waken up between 'selector.select(...)' and
-                        //    'if (wakenUp.get()) { ... }'. (OK)
-                        //
-                        // In the first case, 'wakenUp' is set to true and the
-                        // following 'selector.select(...)' will wake up immediately.
-                        // Until 'wakenUp' is set to false again in the next round,
-                        // 'wakenUp.compareAndSet(false, true)' will fail, and therefore
-                        // any attempt to wake up the Selector will fail, too, causing
-                        // the following 'selector.select(...)' call to block
-                        // unnecessarily.
-                        //
-                        // To fix this problem, we wake up the selector again if wakenUp
-                        // is true immediately after selector.select(...).
-                        // It is inefficient in that it wakes up the selector for both
-                        // the first case (BAD - wake-up required) and the second case
-                        // (OK - no wake-up required).
-
+                    case SelectStrategy.SELECT: // -1
+                        select(wakenUp.getAndSet(false)); // 原子的Boolean类, 这里是为了标识是否唤醒
                         if (wakenUp.get()) {
-                            selector.wakeup();
+                            selector.wakeup(); // 唤醒NIO的I/O多路复用器上的阻塞线程, 让线程及时去处理其他事情，例如注册channel，改变interestOps、判断超时等等。
                         }
                     default:
-                        // fallthrough
+                        // fallthrough 什么都不做
                 }
 
                 cancelledKeys = 0;
@@ -803,7 +786,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 }
 
                 currentTimeNanos = time;
-            }
+            } // end of for(;;) 循环
 
             if (selectCnt > MIN_PREMATURE_SELECTOR_RETURNS) {
                 if (logger.isDebugEnabled()) {

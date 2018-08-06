@@ -68,14 +68,18 @@ public class DefaultThreadFactory implements ThreadFactory {
             throw new NullPointerException("poolType");
         }
 
+        // 拿到NioEventLoop的简单类名
         String poolName = StringUtil.simpleClassName(poolType);
+        // 做字符串转换
         switch (poolName.length()) {
             case 0:
                 return "unknown";
             case 1:
                 return poolName.toLowerCase(Locale.US);
             default:
+                // 如果第一个字符是大写,第二个字符是小写,就做一个转换,比如 NioEventLoop
                 if (Character.isUpperCase(poolName.charAt(0)) && Character.isLowerCase(poolName.charAt(1))) {
+                    // NioEventLoop 转换为 nioEventLoop
                     return Character.toLowerCase(poolName.charAt(0)) + poolName.substring(1);
                 } else {
                     return poolName;

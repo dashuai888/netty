@@ -72,7 +72,7 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
             throw new IllegalArgumentException(String.format("nThreads: %d (expected: > 0)", nThreads));
         }
 
-        if (executor == null) {
+        if (executor == null) { // 为 NioEventLoopGroup 创建线程执行器,去创建其底层线程
             executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
         }
 
@@ -106,10 +106,9 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
                     }
                 }
             }
-        }
+        } // end of for
 
-        chooser = chooserFactory.newChooser(children);
-
+        chooser = chooserFactory.newChooser(children); // 为 EventLoopGroup 创建线程选择器, 为新连接分配EventLoop线程
         final FutureListener<Object> terminationListener = new FutureListener<Object>() {
             @Override
             public void operationComplete(Future<Object> future) throws Exception {

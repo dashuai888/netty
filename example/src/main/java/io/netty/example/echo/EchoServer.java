@@ -52,8 +52,8 @@ public final class EchoServer {
         EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
-            ServerBootstrap b = new ServerBootstrap();
-            b.group(bossGroup, workerGroup)
+            ServerBootstrap serverBootstrap = new ServerBootstrap();
+            serverBootstrap.group(bossGroup, workerGroup)
              .channel(NioServerSocketChannel.class)
              .option(ChannelOption.SO_BACKLOG, 100)
              .handler(new LoggingHandler(LogLevel.INFO))
@@ -69,9 +69,8 @@ public final class EchoServer {
                  }
              });
 
-            // Start the server.
-            ChannelFuture f = b.bind(PORT).sync();
-
+            // Start the server. Netty服务端的启动入口
+            ChannelFuture f = serverBootstrap.bind(PORT).sync(); // port = 8007
             // Wait until the server socket is closed.
             f.channel().closeFuture().sync();
         } finally {
